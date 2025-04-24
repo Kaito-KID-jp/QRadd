@@ -141,6 +141,22 @@
             border-radius: 4px;
         }
 
+        /* デバッグ用ダウンロードリンクのスタイル */
+        #downloadGeneratedPdfLink {
+            display: block;
+            margin-top: 15px;
+            padding: 10px;
+            border: 1px solid blue;
+            background-color: #e0e0ff;
+            color: blue;
+            text-decoration: none;
+            text-align: center;
+            border-radius: 4px;
+        }
+        #downloadGeneratedPdfLink:hover {
+            background-color: #c0c0ff;
+        }
+
     </style>
 </head>
 <body>
@@ -162,6 +178,7 @@
 
             <div>
                 <button type="button" id="printButton" disabled>🖨️ 印刷 (QRコード裏面)</button>
+                <!-- デバッグ用ダウンロードリンクがここに追加される -->
                 <p id="printInstruction" class="print-instruction hidden">
                     印刷ダイアログが表示されます。<br>
                     <b>「両面印刷」</b>を選択し、<b>「短辺とじ (Flip on Short Edge / Top bind)」</b>に設定して印刷してください。
@@ -248,6 +265,12 @@
         async function handleFileSelect(event) {
             clearError();
             hidePrintInstruction();
+            // 既存のダウンロードリンクがあれば削除
+            const existingLink = document.getElementById('downloadGeneratedPdfLink');
+            if (existingLink) {
+                existingLink.remove();
+            }
+
             const file = event.target.files[0];
             if (!file) {
                 selectedPdfFile = null;
@@ -347,15 +370,11 @@
         // --- ロット番号バリデーション ---
         function validateLotNumber() {
             const lotNumber = lotNumberInput.value;
-            const pattern = /^[a-zA-Z0-9\-]*$/;
-            if (!pattern.test(lotNumber)) {
-                // 不正な文字が含まれていれば、それを削除する（あるいはエラー表示）
-                lotNumberInput.value = lotNumber.replace(/[^a-zA-Z0-9\-]/g, '');
-                 showError('ロット番号には半角英数字とハイフンのみ使用できます。', true); // 一時的なエラー表示
-            } else {
-                 clearError(); // 正しければエラーを消す
+            const pattern = /^[a-zA-Z0-9\-]+$/; // 1文字以上の英数字ハイフン
+            if (!pattern.test(lotNumber) && lotNumber !== '') {
+                 return false;
             }
-            return pattern.test(lotNumberInput.value); // 最終的な値でチェック
+            return pattern.test(lotNumberInput.value);
         }
 
         // --- 印刷処理 ---
@@ -364,126 +383,172 @@
                 showError('まずPDFファイルを選択してください。');
                 return;
             }
-            if (!validateLotNumber()) {
-                 showError('ロット番号の形式が正しくありません。半角英数字とハイフンのみ使用可能です。');
-                 return;
-            }
-
             const lotNumber = lotNumberInput.value;
-            if (!lotNumber) {
-                showError('ロット番号を入力してください。');
-                return;
+            if (!/^[a-zA-Z0-9\-]+$/.test(lotNumber)) {
+                 showError('ロット番号を正しく入力してください (半角英数字とハイフンのみ、空欄不可)。');
+                 return;
             }
 
             showProcessing('QRコード生成とPDF加工中...');
             clearError();
             hidePrintInstruction();
+             // 既存のダウンロードリンクがあれば削除 (念のため)
+            const existingLink = document.getElementById('downloadGeneratedPdfLink');
+            if (existingLink) {
+                existingLink.remove();
+            }
 
             try {
                 // 1. QRコードデータ生成
-                const baseFileName = originalPdfFileName.replace(/\.[^/.]+$/, ""); // 拡張子除去
-                const firstPartFileName = baseFileName.split(' ')[0]; // 最初のスペースまで
+                const baseFileName = originalPdfFileName.replace(/\.[^/.]+$/, "");
+                const firstPartFileName = baseFileName.split(' ')[0];
                 const qrData = `FXQR,1,dn,1,#d#,fn,${firstPartFileName}_${lotNumber},hs,1,at,0,RQXF`;
+                console.log('★デバッグログ: QR Data:', qrData);
 
-                // 2. QRコード画像生成 (PNG Data URLとして)
-                const qrCodeDataURL = await QRCode.toDataURL(qrData, {
-                    errorCorrectionLevel: QR_ERROR_CORRECTION_LEVEL.toLowerCase(), // qrcode.jsは小文字
-                    type: 'image/png',
-                    margin: 1, // 境界線のマージン (ボックス単位)
-                    scale: 8, // 解像度（内部的なスケール）
-                    color: {
-                        dark:"#000000",
-                        light:"#FFFFFF"
-                    }
-                });
+                // 2. QRコード画像生成
+                let qrCodeDataURL;
+                try {
+                    qrCodeDataURL = await QRCode.toDataURL(qrData, {
+                        errorCorrectionLevel: QR_ERROR_CORRECTION_LEVEL.toLowerCase(),
+                        type: 'image/png', margin: 1, scale: 8,
+                        color: { dark:"#000000", light:"#FFFFFF" }
+                    });
+                    console.log('★デバッグログ: QR Code Data URL generated (first 100 chars):', qrCodeDataURL.substring(0, 100) + '...');
+                    if (!qrCodeDataURL || !qrCodeDataURL.startsWith('data:image/png')) throw new Error('生成されたData URLが無効です。');
+                } catch (qrError) {
+                    console.error('QRコード生成エラー:', qrError);
+                    throw new Error(`QRコード画像の生成に失敗しました: ${qrError.message}`);
+                }
 
                 // 3. 元のPDF読み込み
                 const pdfBytes = await selectedPdfFile.arrayBuffer();
-                const pdfDoc = await PDFLib.PDFDocument.load(pdfBytes, {
-                    // ignoreEncryption: true // 必要に応じて
-                });
+                const pdfDoc = await PDFLib.PDFDocument.load(pdfBytes);
+                console.log('★デバッグログ: Original PDF loaded. Pages:', pdfDoc.getPageCount());
 
                 // 4. QRコード画像を埋め込み用に変換
-                const qrImageBytes = await fetch(qrCodeDataURL).then(res => res.arrayBuffer());
-                const qrImage = await pdfDoc.embedPng(qrImageBytes);
+                let qrImage;
+                try {
+                    const qrImageBytes = await fetch(qrCodeDataURL).then(res => {
+                        if (!res.ok) throw new Error(`Failed to fetch QR code Data URL: ${res.statusText}`);
+                        return res.arrayBuffer();
+                    });
+                    console.log('★デバッグログ: QR Image Bytes fetched, length:', qrImageBytes.byteLength);
+                    if (qrImageBytes.byteLength === 0) throw new Error('QRコード画像のバイトデータ取得に失敗しました (サイズ0)。');
+                    qrImage = await pdfDoc.embedPng(qrImageBytes);
+                    console.log('★デバッグログ: QR Image embedded into PDF:', qrImage);
+                    if (!qrImage || !qrImage.ref) throw new Error('pdfDoc.embedPng が有効な画像を返しませんでした。');
+                } catch (embedError) {
+                    console.error('Error embedding QR code image:', embedError);
+                    throw new Error(`QRコード画像の埋め込みに失敗しました: ${embedError.message}`);
+                }
 
                 // 5. 新しいPDFを作成し、ページとQRコードを追加
                 const newPdfDoc = await PDFLib.PDFDocument.create();
                 const pageIndices = pdfDoc.getPageIndices();
+                console.log('★デバッグログ: Calculated QR Size (points):', QR_SIZE_POINTS);
 
                 for (const pageIndex of pageIndices) {
+                    console.log(`★デバッグログ: Processing page index: ${pageIndex}`);
+
                     // 元のページをコピー
                     const [originalPage] = await newPdfDoc.copyPages(pdfDoc, [pageIndex]);
                     newPdfDoc.addPage(originalPage);
+                    const originalPageSize = originalPage.getSize();
+                    console.log(`★デバッグログ: Original page ${pageIndex + 1} (size: ${originalPageSize.width}x${originalPageSize.height}) copied.`);
 
-                    // QRコード用の新しいページを追加 (2ページ目として)
-                    const qrPage = newPdfDoc.addPage([originalPage.getWidth(), originalPage.getHeight()]);
+                    // QRコード用の新しいページを追加
+                    const qrPage = newPdfDoc.addPage([originalPageSize.width, originalPageSize.height]);
+                    console.log(`★デバッグログ: QR page added for page ${pageIndex + 1}.`);
 
-                    // QRコードを中央に配置
-                    qrPage.drawImage(qrImage, {
-                        x: (originalPage.getWidth() - QR_SIZE_POINTS) / 2, // 中央
-                        y: (originalPage.getHeight() - QR_SIZE_POINTS) / 2, // 中央
-                        width: QR_SIZE_POINTS,
-                        height: QR_SIZE_POINTS,
-                    });
+                    // QRコードを描画 (アプローチ2: 中央に大きく)
+                    try {
+                        if (!qrImage || typeof qrImage.scale !== 'function') {
+                             throw new Error('埋め込まれたQR画像オブジェクト(qrImage)が無効です。描画できません。');
+                        }
+                        // ページサイズ取得
+                        const pageSize = qrPage.getSize();
+                        const pageWidth = pageSize.width;
+                        const pageHeight = pageSize.height;
+
+                        // ★★★ 描画サイズと位置を変更 (デバッグ用) ★★★
+                        const drawSize = 100; // ポイント単位で固定サイズ (約35mm)
+                        const drawX = (pageWidth - drawSize) / 2; // X座標中央
+                        const drawY = (pageHeight - drawSize) / 2; // Y座標中央
+                        console.log(`★デバッグログ: Drawing QR code on page ${pageIndex + 1} at (${drawX.toFixed(2)}, ${drawY.toFixed(2)}) with size ${drawSize}x${drawSize}`);
+
+                        qrPage.drawImage(qrImage, {
+                            x: drawX,
+                            y: drawY,
+                            width: drawSize,
+                            height: drawSize,
+                        });
+                         console.log(`★デバッグログ: QR code drawn attempt finished for page ${pageIndex + 1}.`);
+                    } catch (drawError) {
+                         console.error(`Error drawing QR code on page ${pageIndex + 1}:`, drawError);
+                         throw new Error(`QRコードの描画に失敗しました (ページ ${pageIndex + 1}): ${drawError.message}`);
+                    }
                 }
 
                 // 6. 加工済みPDFをバイトデータとして保存
-                const newPdfBytes = await newPdfDoc.save({
-                    useObjectStreams: true // 圧縮を試みる (pdf-libのデフォルトに近い)
-                });
+                const newPdfBytes = await newPdfDoc.save({ useObjectStreams: true });
+                console.log('★デバッグログ: New PDF saved to bytes. Size:', newPdfBytes.byteLength);
 
                 // 7. BlobとObject URLの作成
                 const pdfBlob = new Blob([newPdfBytes], { type: 'application/pdf' });
-
-                // 以前のObject URLがあれば解放
                 if (currentObjectUrl) {
                     URL.revokeObjectURL(currentObjectUrl);
                 }
                 currentObjectUrl = URL.createObjectURL(pdfBlob);
 
-                // 8. 非表示iframeで印刷
-                printIframe.src = currentObjectUrl;
+                // ★★★ アプローチ1: 生成されたPDFをダウンロードするリンクを作成 ★★★
+                const downloadLink = document.createElement('a');
+                downloadLink.id = 'downloadGeneratedPdfLink'; // IDを付与
+                downloadLink.href = currentObjectUrl;
+                downloadLink.download = `qr_inserted_${originalPdfFileName}`;
+                downloadLink.textContent = '生成されたPDFをダウンロードして確認';
+                // 印刷ボタンの下、印刷指示の上に挿入
+                printButton.parentNode.insertBefore(downloadLink, printInstruction);
+                console.log('★デバッグログ: Download link created for generated PDF.');
 
-                // iframeの読み込み完了を待って印刷実行
+
+                // 8. 非表示iframeで印刷
+                let printJobPending = false;
                 printIframe.onload = () => {
-                    try {
-                        showPrintInstruction(); // 印刷指示を表示
-                        printIframe.contentWindow.print();
-                         // 注意: onload は print() 実行後に再度呼ばれることがあるため、無限ループにならないように考慮が必要な場合がある
-                         // ここでは単純化のため、onload 内で print を呼ぶだけにしている
-                         // 印刷ダイアログが閉じられたことの直接的な検知は難しい
-                    } catch (printError) {
-                        console.error('印刷コマンド実行エラー:', printError);
-                        showError(`印刷の開始に失敗しました: ${printError.message}`);
-                        URL.revokeObjectURL(currentObjectUrl); // エラー時も解放
-                        currentObjectUrl = null;
-                    } finally {
-                        hideProcessing(); // 印刷ダイアログ表示で一旦処理中表示を消す
+                    if (printIframe.src && printIframe.src.startsWith('blob:') && printJobPending) {
+                        try {
+                            printJobPending = false;
+                            showPrintInstruction();
+                            printIframe.contentWindow.print();
+                            hideProcessing();
+                            console.log('★デバッグログ: Print dialog should be open.');
+                        } catch (printError) {
+                            console.error('印刷コマンド実行エラー:', printError);
+                            showError(`印刷の開始に失敗しました: ${printError.message}`);
+                            hideProcessing();
+                            if (currentObjectUrl) { URL.revokeObjectURL(currentObjectUrl); currentObjectUrl = null; }
+                        }
                     }
                 };
                 printIframe.onerror = (err) => {
                      console.error('iframe読み込みエラー:', err);
                      showError('印刷用PDFの読み込みに失敗しました。');
                      hideProcessing();
-                     if (currentObjectUrl) {
-                         URL.revokeObjectURL(currentObjectUrl);
-                         currentObjectUrl = null;
-                     }
+                     if (currentObjectUrl) { URL.revokeObjectURL(currentObjectUrl); currentObjectUrl = null; }
                 };
-
+                printJobPending = true;
+                printIframe.src = currentObjectUrl;
+                console.log('★デバッグログ: Setting iframe src to:', currentObjectUrl);
 
             } catch (error) {
-                console.error('処理エラー:', error);
+                console.error('全体処理エラー:', error);
                 let message = `エラーが発生しました: ${error.message}`;
                 if (error instanceof PDFLib.PDFDocumentInvalidPasswordError) {
                     message = 'PDFファイルがパスワードで保護されているため、処理できません。';
-                } else if (error.name === 'InvalidPDFDataError') {
+                } else if (error.message.includes('Invalid PDF structure') || error.name === 'InvalidPDFDataError') {
                     message = 'PDFファイルの形式が正しくないか、破損している可能性があります。';
                 }
                 showError(message);
                 hideProcessing();
-                // エラー発生時にObject URLが生成されていれば解放
                 if (currentObjectUrl) {
                     URL.revokeObjectURL(currentObjectUrl);
                     currentObjectUrl = null;
@@ -495,25 +560,21 @@
         function showProcessing(message = '処理中...') {
             processingOverlay.querySelector('p').textContent = message;
             processingOverlay.classList.remove('hidden');
-            document.body.style.cursor = 'wait'; // bodyにも適用
+            document.body.style.cursor = 'wait';
         }
-
         function hideProcessing() {
             processingOverlay.classList.add('hidden');
             document.body.style.cursor = 'default';
         }
-
         function showError(message, temporary = false) {
             errorMessageDiv.textContent = message;
             if (temporary) {
-                setTimeout(clearError, 3000); // 3秒後にエラーメッセージを消す
+                setTimeout(clearError, 3000);
             }
         }
-
         function clearError() {
             errorMessageDiv.textContent = '';
         }
-
         function showPrintInstruction() {
             printInstruction.classList.remove('hidden');
         }
@@ -525,9 +586,9 @@
         window.onload = initialize;
 
         // --- ページアンロード時にObject URLを解放 ---
-        // (ブラウザが通常行うが、念のため)
         window.addEventListener('beforeunload', () => {
             if (currentObjectUrl) {
+                console.log('★デバッグログ: Revoking Object URL on page unload:', currentObjectUrl);
                 URL.revokeObjectURL(currentObjectUrl);
             }
         });
