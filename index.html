@@ -94,66 +94,254 @@
         let originalPdfFileName = '';
         let currentObjectUrl = null;
 
-        // --- 初期化, ファイル選択, プレビュー表示, バリデーション (変更なし) ---
-        function initialize() { /* ... */ const today = new Date(); const year = String(today.getFullYear()).slice(-2); const month = String(today.getMonth() + 1).padStart(2, '0'); const day = String(today.getDate()).padStart(2, '0'); lotNumberInput.value = `${year}-${month}-${day}`; pdfFileInput.addEventListener('change', handleFileSelect); lotNumberInput.addEventListener('input', validateLotNumber); printButton.addEventListener('click', handlePrint); let resizeTimeout; window.addEventListener('resize', () => { clearTimeout(resizeTimeout); resizeTimeout = setTimeout(() => { if (selectedPdfFile) { displayPdfPreview(selectedPdfFile); } }, 250); }); }
-        async function handleFileSelect(event) { /* ... */ clearError(); hidePrintInstruction(); const existingLink = document.getElementById('downloadGeneratedPdfLink'); if (existingLink) { existingLink.remove(); } const file = event.target.files[0]; if (!file) { selectedPdfFile = null; fileNameLabel.textContent = 'ファイル未選択'; printButton.disabled = true; clearPreview(); return; } if (file.type !== 'application/pdf') { showError('PDFファイルを選択してください。'); selectedPdfFile = null; fileNameLabel.textContent = 'ファイル未選択'; printButton.disabled = true; clearPreview(); pdfFileInput.value = ''; return; } selectedPdfFile = file; originalPdfFileName = file.name; fileNameLabel.textContent = originalPdfFileName; printButton.disabled = false; showProcessing('プレビューを読み込み中...'); try { await displayPdfPreview(selectedPdfFile); } catch (error) { console.error('プレビュー生成エラー:', error); showError(`PDFプレビューの表示に失敗しました: ${error.message}`); clearPreview(); printButton.disabled = true; } finally { hideProcessing(); } }
-        async function displayPdfPreview(file) { /* ... */ const fileReader = new FileReader(); fileReader.readAsArrayBuffer(file); return new Promise((resolve, reject) => { fileReader.onload = async (event) => { const pdfData = new Uint8Array(event.target.result); try { const loadingTask = pdfjsLib.getDocument({ data: pdfData }); const pdf = await loadingTask.promise; if (pdf.numPages === 0) throw new Error('PDFにページがありません。'); const page = await pdf.getPage(1); const viewport = page.getViewport({ scale: 1.5 }); const canvasContext = previewCanvas.getContext('2d'); const containerWidth = previewArea.clientWidth; const containerHeight = previewArea.clientHeight; const scale = Math.min(containerWidth / viewport.width, containerHeight / viewport.height); const scaledViewport = page.getViewport({ scale: scale * 0.95 }); previewCanvas.height = scaledViewport.height; previewCanvas.width = scaledViewport.width; const renderContext = { canvasContext: canvasContext, viewport: scaledViewport }; await page.render(renderContext).promise; previewMessage.classList.add('hidden'); previewCanvas.classList.remove('hidden'); resolve(); } catch (error) { console.error('PDFプレビュー処理エラー:', error); reject(error); } }; fileReader.onerror = (error) => { console.error('ファイル読み込みエラー:', error); reject(new Error('ファイル読み込みに失敗しました。')); }; }); }
-        function clearPreview() { /* ... */ if (previewCanvas && previewCanvas.getContext) { const context = previewCanvas.getContext('2d'); context.clearRect(0, 0, previewCanvas.width, previewCanvas.height); previewCanvas.classList.add('hidden'); } if (previewMessage) { previewMessage.textContent = 'PDFファイルを選択してください'; previewMessage.classList.remove('hidden'); } }
-        function validateLotNumber() { /* ... */ const lotNumber = lotNumberInput.value; const pattern = /^[a-zA-Z0-9\-]+$/; if (!pattern.test(lotNumber) && lotNumber !== '') { return false; } return pattern.test(lotNumberInput.value); }
+        // --- 初期化処理 ---
+        function initialize() {
+            const today = new Date();
+            const year = String(today.getFullYear()).slice(-2);
+            const month = String(today.getMonth() + 1).padStart(2, '0');
+            const day = String(today.getDate()).padStart(2, '0');
+            lotNumberInput.value = `${year}-${month}-${day}`;
+            
+            pdfFileInput.addEventListener('change', handleFileSelect);
+            lotNumberInput.addEventListener('input', validateLotNumber);
+            printButton.addEventListener('click', handlePrint);
+            
+            let resizeTimeout;
+            window.addEventListener('resize', () => {
+                clearTimeout(resizeTimeout);
+                resizeTimeout = setTimeout(() => {
+                    if (selectedPdfFile) {
+                        displayPdfPreview(selectedPdfFile);
+                    }
+                }, 250);
+            });
+        }
+
+        // --- ファイル選択処理 ---
+        async function handleFileSelect(event) {
+            clearError();
+            hidePrintInstruction();
+            
+            const existingLink = document.getElementById('downloadGeneratedPdfLink');
+            if (existingLink) {
+                existingLink.remove();
+            }
+            
+            const file = event.target.files[0];
+            if (!file) {
+                selectedPdfFile = null;
+                fileNameLabel.textContent = 'ファイル未選択';
+                printButton.disabled = true;
+                clearPreview();
+                return;
+            }
+            
+            if (file.type !== 'application/pdf') {
+                showError('PDFファイルを選択してください。');
+                selectedPdfFile = null;
+                fileNameLabel.textContent = 'ファイル未選択';
+                printButton.disabled = true;
+                clearPreview();
+                pdfFileInput.value = '';
+                return;
+            }
+            
+            selectedPdfFile = file;
+            originalPdfFileName = file.name;
+            fileNameLabel.textContent = originalPdfFileName;
+            printButton.disabled = false;
+            
+            showProcessing('プレビューを読み込み中...');
+            try {
+                await displayPdfPreview(selectedPdfFile);
+            } catch (error) {
+                console.error('プレビュー生成エラー:', error);
+                showError(`PDFプレビューの表示に失敗しました: ${error.message}`);
+                clearPreview();
+                printButton.disabled = true;
+            } finally {
+                hideProcessing();
+            }
+        }
+
+        // --- PDFプレビュー表示 ---
+        async function displayPdfPreview(file) {
+            const fileReader = new FileReader();
+            fileReader.readAsArrayBuffer(file);
+            
+            return new Promise((resolve, reject) => {
+                fileReader.onload = async (event) => {
+                    const pdfData = new Uint8Array(event.target.result);
+                    try {
+                        const loadingTask = pdfjsLib.getDocument({ data: pdfData });
+                        const pdf = await loadingTask.promise;
+                        
+                        if (pdf.numPages === 0) throw new Error('PDFにページがありません。');
+                        
+                        const page = await pdf.getPage(1);
+                        const viewport = page.getViewport({ scale: 1.5 });
+                        const canvasContext = previewCanvas.getContext('2d');
+                        
+                        const containerWidth = previewArea.clientWidth;
+                        const containerHeight = previewArea.clientHeight;
+                        const scale = Math.min(containerWidth / viewport.width, containerHeight / viewport.height);
+                        const scaledViewport = page.getViewport({ scale: scale * 0.95 });
+                        
+                        previewCanvas.height = scaledViewport.height;
+                        previewCanvas.width = scaledViewport.width;
+                        
+                        const renderContext = {
+                            canvasContext: canvasContext,
+                            viewport: scaledViewport
+                        };
+                        
+                        await page.render(renderContext).promise;
+                        previewMessage.classList.add('hidden');
+                        previewCanvas.classList.remove('hidden');
+                        
+                        resolve();
+                    } catch (error) {
+                        console.error('PDFプレビュー処理エラー:', error);
+                        reject(error);
+                    }
+                };
+                
+                fileReader.onerror = (error) => {
+                    console.error('ファイル読み込みエラー:', error);
+                    reject(new Error('ファイル読み込みに失敗しました。'));
+                };
+            });
+        }
+
+        // --- プレビュークリア ---
+        function clearPreview() {
+            if (previewCanvas && previewCanvas.getContext) {
+                const context = previewCanvas.getContext('2d');
+                context.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+                previewCanvas.classList.add('hidden');
+            }
+            
+            if (previewMessage) {
+                previewMessage.textContent = 'PDFファイルを選択してください';
+                previewMessage.classList.remove('hidden');
+            }
+        }
+
+        // --- ロット番号バリデーション ---
+        function validateLotNumber() {
+            const lotNumber = lotNumberInput.value;
+            const pattern = /^[a-zA-Z0-9\-]+$/;
+            
+            if (!pattern.test(lotNumber) && lotNumber !== '') {
+                return false;
+            }
+            
+            return pattern.test(lotNumberInput.value);
+        }
+
+        // --- QRコード生成 ---
+        function generateQRCodeDataURL(text) {
+            return new Promise((resolve, reject) => {
+                try {
+                    QRCode.toDataURL(text, {
+                        errorCorrectionLevel: QR_ERROR_CORRECTION_LEVEL,
+                        margin: 1,
+                        width: 300,
+                        color: {
+                            dark: '#000000',
+                            light: '#FFFFFF'
+                        }
+                    }, (err, url) => {
+                        if (err) {
+                            console.error('QRコード生成エラー:', err);
+                            reject(new Error(`QRコードの生成に失敗しました: ${err.message}`));
+                            return;
+                        }
+                        resolve(url);
+                    });
+                } catch (error) {
+                    console.error('QRコード生成例外:', error);
+                    reject(new Error(`QRコードの生成処理中にエラーが発生しました: ${error.message}`));
+                }
+            });
+        }
 
         // --- 印刷処理 ---
         async function handlePrint() {
-            if (!selectedPdfFile) { showError('まずPDFファイルを選択してください。'); return; }
+            if (!selectedPdfFile) {
+                showError('まずPDFファイルを選択してください。');
+                return;
+            }
+            
             const lotNumber = lotNumberInput.value;
-            if (!/^[a-zA-Z0-9\-]+$/.test(lotNumber)) { showError('ロット番号を正しく入力してください (半角英数字とハイフンのみ、空欄不可)。'); return; }
+            if (!/^[a-zA-Z0-9\-]+$/.test(lotNumber)) {
+                showError('ロット番号を正しく入力してください (半角英数字とハイフンのみ、空欄不可)。');
+                return;
+            }
 
-            showProcessing('テスト画像(中央)生成とPDF加工中...'); // メッセージ変更
+            showProcessing('QRコード生成とPDF加工中...');
             clearError();
             hidePrintInstruction();
+            
             const existingLink = document.getElementById('downloadGeneratedPdfLink');
-            if (existingLink) { existingLink.remove(); }
+            if (existingLink) {
+                existingLink.remove();
+            }
 
             try {
-                // 1. QRコードデータ生成 (今回は使用しない)
+                // 1. QRコードデータ生成
+                const qrCodeDataURL = await generateQRCodeDataURL(lotNumber);
+                console.log('★デバッグログ: QR Code Data URL generated for:', lotNumber);
 
-                // 2. テスト用PNG画像のData URLを直接使用
-                const testPngDataURL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
-                console.log('★デバッグログ: Using Test PNG Data URL:', testPngDataURL);
-
-                // 3. 元のPDF読み込み
+                // 2. 元のPDF読み込み
                 const pdfBytes = await selectedPdfFile.arrayBuffer();
                 const pdfDoc = await PDFLib.PDFDocument.load(pdfBytes);
                 console.log('★デバッグログ: Original PDF loaded. Pages:', pdfDoc.getPageCount());
 
-                // 4. テスト用画像を埋め込み用に変換
-                let testImage;
+                // 3. QRコード画像を埋め込み用に変換
+                let qrImage;
                 try {
-                    const testImageBytes = await fetch(testPngDataURL).then(res => { if (!res.ok) throw new Error(`Failed to fetch Test PNG Data URL: ${res.statusText}`); return res.arrayBuffer(); });
-                    console.log('★デバッグログ: Test Image Bytes fetched, length:', testImageBytes.byteLength);
-                    if (testImageBytes.byteLength === 0) throw new Error('テスト用画像のバイトデータ取得に失敗しました (サイズ0)。');
-                    testImage = await pdfDoc.embedPng(testImageBytes);
-                    console.log('★デバッグログ: Test Image embedded into PDF:', testImage);
-                    if (!testImage || !testImage.ref) throw new Error('pdfDoc.embedPng が有効な画像を返しませんでした (テスト用)。');
-                } catch (embedError) { console.error('Error embedding Test PNG image:', embedError); throw new Error(`テスト用画像の埋め込みに失敗しました: ${embedError.message}`); }
+                    const qrImageBytes = await fetch(qrCodeDataURL).then(res => {
+                        if (!res.ok) throw new Error(`Failed to fetch QR Code Data URL: ${res.statusText}`);
+                        return res.arrayBuffer();
+                    });
+                    console.log('★デバッグログ: QR Image Bytes fetched, length:', qrImageBytes.byteLength);
+                    
+                    if (qrImageBytes.byteLength === 0)
+                        throw new Error('QRコード画像のバイトデータ取得に失敗しました (サイズ0)。');
+                    
+                    qrImage = await pdfDoc.embedPng(qrImageBytes);
+                    console.log('★デバッグログ: QR Image embedded into PDF:', qrImage);
+                    
+                    if (!qrImage || !qrImage.ref)
+                        throw new Error('pdfDoc.embedPng が有効な画像を返しませんでした (QRコード)。');
+                } catch (embedError) {
+                    console.error('Error embedding QR image:', embedError);
+                    throw new Error(`QRコード画像の埋め込みに失敗しました: ${embedError.message}`);
+                }
 
-                // 5. 新しいPDFを作成し、ページとテスト用画像を追加
+                // 4. 新しいPDFを作成し、ページとQRコード画像を追加
                 const newPdfDoc = await PDFLib.PDFDocument.create();
                 const pageIndices = pdfDoc.getPageIndices();
                 console.log('★デバッグログ: Target Draw Size (points):', QR_SIZE_POINTS);
 
                 for (const pageIndex of pageIndices) {
                     console.log(`★デバッグログ: Processing page index: ${pageIndex}`);
+                    
+                    // 元のページをコピー
                     const [originalPage] = await newPdfDoc.copyPages(pdfDoc, [pageIndex]);
                     newPdfDoc.addPage(originalPage);
                     const originalPageSize = originalPage.getSize();
                     console.log(`★デバッグログ: Original page ${pageIndex + 1} (size: ${originalPageSize.width}x${originalPageSize.height}) copied.`);
+                    
+                    // QRコード用の新しいページを追加
                     const addedPage = newPdfDoc.addPage([originalPageSize.width, originalPageSize.height]);
-                    console.log(`★デバッグログ: Test Image page added for page ${pageIndex + 1}.`);
+                    console.log(`★デバッグログ: QR Code page added for page ${pageIndex + 1}.`);
 
-                    // ***** ここからが変更点 *****
-                    // テスト用画像を描画 (中央に)
+                    // QRコードを描画 (中央に)
                     try {
-                        if (!testImage || typeof testImage.scale !== 'function') throw new Error('埋め込まれたテスト用画像オブジェクトが無効です。描画できません。');
+                        if (!qrImage || typeof qrImage.scale !== 'function')
+                            throw new Error('埋め込まれたQRコード画像オブジェクトが無効です。描画できません。');
 
                         // ページサイズ取得
                         const pageSize = addedPage.getSize();
@@ -161,67 +349,143 @@
                         const pageHeight = pageSize.height;
 
                         // scale() を使って目標サイズに合わせる
-                        const scaledDims = testImage.scale(QR_SIZE_POINTS / testImage.width);
-                        console.log(`★デバッグログ: Scaled Test Image dimensions: ${scaledDims.width.toFixed(2)} x ${scaledDims.height.toFixed(2)}`);
+                        const scaledDims = qrImage.scale(QR_SIZE_POINTS / qrImage.width);
+                        console.log(`★デバッグログ: Scaled QR Image dimensions: ${scaledDims.width.toFixed(2)} x ${scaledDims.height.toFixed(2)}`);
 
-                        // ★★★ 描画位置を中央に変更 ★★★
+                        // 描画位置を中央に設定
                         const drawX = (pageWidth - scaledDims.width) / 2;
                         const drawY = (pageHeight - scaledDims.height) / 2;
-                        console.log(`★デバッグログ: Drawing Test Image on page ${pageIndex + 1} at (${drawX.toFixed(2)}, ${drawY.toFixed(2)}) with scaled size`);
+                        console.log(`★デバッグログ: Drawing QR Image on page ${pageIndex + 1} at (${drawX.toFixed(2)}, ${drawY.toFixed(2)}) with scaled size`);
 
-                        addedPage.drawImage(testImage, {
-                            x: drawX, y: drawY,
-                            width: scaledDims.width, height: scaledDims.height
+                        addedPage.drawImage(qrImage, {
+                            x: drawX,
+                            y: drawY,
+                            width: scaledDims.width,
+                            height: scaledDims.height
                         });
-                        console.log(`★デバッグログ: Test Image drawn attempt finished for page ${pageIndex + 1}.`);
+                        console.log(`★デバッグログ: QR Image drawn for page ${pageIndex + 1}.`);
 
                     } catch (drawError) {
-                        console.error(`Error drawing Test Image on page ${pageIndex + 1}:`, drawError);
-                        throw new Error(`テスト用画像の描画に失敗しました (ページ ${pageIndex + 1}): ${drawError.message}`);
+                        console.error(`Error drawing QR Image on page ${pageIndex + 1}:`, drawError);
+                        throw new Error(`QRコード画像の描画に失敗しました (ページ ${pageIndex + 1}): ${drawError.message}`);
                     }
-                    // ***** ここまでが変更点 *****
                 }
 
-                // 6. 加工済みPDFをバイトデータとして保存
+                // 5. 加工済みPDFをバイトデータとして保存
                 const newPdfBytes = await newPdfDoc.save({ useObjectStreams: true });
                 console.log('★デバッグログ: New PDF saved to bytes. Size:', newPdfBytes.byteLength);
 
-                // 7. BlobとObject URLの作成
+                // 6. BlobとObject URLの作成
                 const pdfBlob = new Blob([newPdfBytes], { type: 'application/pdf' });
-                if (currentObjectUrl) { URL.revokeObjectURL(currentObjectUrl); }
+                if (currentObjectUrl) {
+                    URL.revokeObjectURL(currentObjectUrl);
+                }
                 currentObjectUrl = URL.createObjectURL(pdfBlob);
 
-                // 8. デバッグ用ダウンロードリンク作成
+                // 7. デバッグ用ダウンロードリンク作成
                 const downloadLink = document.createElement('a');
                 downloadLink.id = 'downloadGeneratedPdfLink';
                 downloadLink.href = currentObjectUrl;
-                downloadLink.download = `test_png_center_${originalPdfFileName}`; // ファイル名変更
-                downloadLink.textContent = '生成されたPDF(テストPNG中央版)をダウンロード'; // テキスト変更
+                downloadLink.download = `QR_${lotNumber}_${originalPdfFileName}`;
+                downloadLink.textContent = '生成されたPDF(QRコード入り)をダウンロード';
                 printButton.parentNode.insertBefore(downloadLink, printInstruction);
-                console.log('★デバッグログ: Download link created for generated PDF (Test PNG Center).');
+                console.log('★デバッグログ: Download link created for generated PDF with QR code.');
 
-                // 9. 非表示iframeで印刷
+                // 8. 非表示iframeで印刷
                 let printJobPending = false;
-                printIframe.onload = () => { if (printIframe.src && printIframe.src.startsWith('blob:') && printJobPending) { try { printJobPending = false; showPrintInstruction(); printIframe.contentWindow.print(); hideProcessing(); console.log('★デバッグログ: Print dialog should be open.'); } catch (printError) { console.error('印刷コマンド実行エラー:', printError); showError(`印刷の開始に失敗しました: ${printError.message}`); hideProcessing(); if (currentObjectUrl) { URL.revokeObjectURL(currentObjectUrl); currentObjectUrl = null; } } } };
-                printIframe.onerror = (err) => { console.error('iframe読み込みエラー:', err); showError('印刷用PDFの読み込みに失敗しました。'); hideProcessing(); if (currentObjectUrl) { URL.revokeObjectURL(currentObjectUrl); currentObjectUrl = null; } };
+                printIframe.onload = () => {
+                    if (printIframe.src && printIframe.src.startsWith('blob:') && printJobPending) {
+                        try {
+                            printJobPending = false;
+                            showPrintInstruction();
+                            printIframe.contentWindow.print();
+                            hideProcessing();
+                            console.log('★デバッグログ: Print dialog should be open.');
+                        } catch (printError) {
+                            console.error('印刷コマンド実行エラー:', printError);
+                            showError(`印刷の開始に失敗しました: ${printError.message}`);
+                            hideProcessing();
+                            if (currentObjectUrl) {
+                                URL.revokeObjectURL(currentObjectUrl);
+                                currentObjectUrl = null;
+                            }
+                        }
+                    }
+                };
+                
+                printIframe.onerror = (err) => {
+                    console.error('iframe読み込みエラー:', err);
+                    showError('印刷用PDFの読み込みに失敗しました。');
+                    hideProcessing();
+                    if (currentObjectUrl) {
+                        URL.revokeObjectURL(currentObjectUrl);
+                        currentObjectUrl = null;
+                    }
+                };
+                
                 printJobPending = true;
                 printIframe.src = currentObjectUrl;
                 console.log('★デバッグログ: Setting iframe src to:', currentObjectUrl);
 
-            } catch (error) { /* ... (エラーハンドリング変更なし) ... */ console.error('全体処理エラー:', error); let message = `エラーが発生しました: ${error.message}`; if (error instanceof PDFLib.PDFDocumentInvalidPasswordError) { message = 'PDFファイルがパスワードで保護されているため、処理できません。'; } else if (error.message.includes('Invalid PDF structure') || error.name === 'InvalidPDFDataError') { message = 'PDFファイルの形式が正しくないか、破損している可能性があります。'; } showError(message); hideProcessing(); if (currentObjectUrl) { URL.revokeObjectURL(currentObjectUrl); currentObjectUrl = null; } }
+            } catch (error) {
+                console.error('全体処理エラー:', error);
+                
+                let message = `エラーが発生しました: ${error.message}`;
+                if (error instanceof PDFLib.PDFDocumentInvalidPasswordError) {
+                    message = 'PDFファイルがパスワードで保護されているため、処理できません。';
+                } else if (error.message.includes('Invalid PDF structure') || error.name === 'InvalidPDFDataError') {
+                    message = 'PDFファイルの形式が正しくないか、破損している可能性があります。';
+                }
+                
+                showError(message);
+                hideProcessing();
+                
+                if (currentObjectUrl) {
+                    URL.revokeObjectURL(currentObjectUrl);
+                    currentObjectUrl = null;
+                }
+            }
         }
 
-        // --- ユーティリティ関数 (変更なし) ---
-        function showProcessing(message = '処理中...') { processingOverlay.querySelector('p').textContent = message; processingOverlay.classList.remove('hidden'); document.body.style.cursor = 'wait'; }
-        function hideProcessing() { processingOverlay.classList.add('hidden'); document.body.style.cursor = 'default'; }
-        function showError(message, temporary = false) { errorMessageDiv.textContent = message; if (temporary) { setTimeout(clearError, 3000); } }
-        function clearError() { errorMessageDiv.textContent = ''; }
-        function showPrintInstruction() { printInstruction.classList.remove('hidden'); }
-        function hidePrintInstruction() { printInstruction.classList.add('hidden'); }
+        // --- ユーティリティ関数 ---
+        function showProcessing(message = '処理中...') {
+            processingOverlay.querySelector('p').textContent = message;
+            processingOverlay.classList.remove('hidden');
+            document.body.style.cursor = 'wait';
+        }
+        
+        function hideProcessing() {
+            processingOverlay.classList.add('hidden');
+            document.body.style.cursor = 'default';
+        }
+        
+        function showError(message, temporary = false) {
+            errorMessageDiv.textContent = message;
+            if (temporary) {
+                setTimeout(clearError, 3000);
+            }
+        }
+        
+        function clearError() {
+            errorMessageDiv.textContent = '';
+        }
+        
+        function showPrintInstruction() {
+            printInstruction.classList.remove('hidden');
+        }
+        
+        function hidePrintInstruction() {
+            printInstruction.classList.add('hidden');
+        }
 
-        // --- 初期化呼び出し、アンロード処理 (変更なし) ---
+        // --- 初期化呼び出し、アンロード処理 ---
         window.onload = initialize;
-        window.addEventListener('beforeunload', () => { if (currentObjectUrl) { console.log('★デバッグログ: Revoking Object URL on page unload:', currentObjectUrl); URL.revokeObjectURL(currentObjectUrl); } });
+        window.addEventListener('beforeunload', () => {
+            if (currentObjectUrl) {
+                console.log('★デバッグログ: Revoking Object URL on page unload:', currentObjectUrl);
+                URL.revokeObjectURL(currentObjectUrl);
+            }
+        });
     </script>
 </body>
 </html>
